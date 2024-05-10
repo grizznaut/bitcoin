@@ -86,6 +86,7 @@ class PSBTTest(BitcoinTestFramework):
         # Mine a transaction that credits the offline address
         offline_addr = offline_node.getnewaddress(address_type="bech32m")
         online_addr = w2.getnewaddress(address_type="bech32m")
+        online_substitute_addr = w2.getnewaddress(address_type="bech32m")
         wonline.importaddress(offline_addr, "", False)
         mining_wallet = mining_node.get_wallet_rpc(self.default_wallet_name)
         mining_wallet.sendtoaddress(address=offline_addr, amount=1.0)
@@ -106,6 +107,15 @@ class PSBTTest(BitcoinTestFramework):
         # Have the offline node sign the PSBT (which will remove the non-witness UTXO)
         signed_psbt = offline_node.walletprocesspsbt(psbt_new.to_base64())
         assert not "non_witness_utxo" in mining_node.decodepsbt(signed_psbt["psbt"])["inputs"][0]
+
+        # Modify the raw transaction by changing the output address, so the signature is no longer valid
+        signed_psbt_new = PSBT.from_base64(signed_psbt["psbt"])
+        utxos = wonline.listunspent(addresses=[offline_addr])
+        raw = wonline.createrawtransaction([{"txid":utxos[0]["txid"], "vout":utxos[0]["vout"]}],[{online_substitute_addr:0.9999}])
+        signed_psbt_new.g.map[PSBT_GLOBAL_UNSIGNED_TX] = bytes.fromhex(raw)
+
+        # Have the offline node sign the modified PSBT (this step fails)
+        signed_psbt = offline_node.walletprocesspsbt(signed_psbt_new.to_base64())
 
         # Make sure we can mine the resulting transaction
         txid = mining_node.sendrawtransaction(signed_psbt["hex"])
